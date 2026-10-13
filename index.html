@@ -184,7 +184,14 @@ const steps=[
 ];
 const project=document.getElementById('glass-project'),start=document.getElementById('generate-project'),topStatus=document.getElementById('project-generation-status'),container=document.getElementById('stage-container'),selects=[document.getElementById('material'),document.getElementById('style')];
 const stages=[...document.querySelectorAll('.scene-stage')];
-let started=false,runId=0;
+let started=false,runId=0,lockedScene=null;
+const pickOne=a=>a[Math.floor(Math.random()*a.length)];
+const POTS=['an elegant weathered terracotta pot','a glossy cobalt-glazed ceramic pot','a matte white stoneware pot','a hand-thrown speckled clay pot','an aged copper planter with green patina','a moss-covered carved stone urn','a vintage cream enamel pot','a charcoal concrete planter'];
+const SURFACES=['a rustic oak table','a slate windowsill','a worn marble ledge','a mossy garden stone','a potting bench dusted with soil','a weathered teak deck'];
+const LIGHTS=['warm golden morning light from upper left','soft overcast daylight','late-afternoon backlight with gentle lens glow','cool blue-hour light with a warm accent lamp','dappled sunlight filtering through leaves'];
+const BACKS=['blurred deep green garden bokeh','soft-focus greenhouse glass panes','a misty cottage garden','a dark moody studio backdrop','a sunlit kitchen window blur','rain-speckled window bokeh'];
+const DETAILS=['subtle differences in exact shape, placement and fine texture of the botanical parts','a slightly different natural arrangement of the growing parts','unique micro-details in the reflections and surface texture of the botanical parts','a distinct but botanically plausible variation in form and proportion'];
+const randomScene=()=>pickOne(POTS)+' on '+pickOne(SURFACES)+', '+pickOne(LIGHTS)+', '+pickOne(BACKS);
 for(const b of document.querySelectorAll('.generate-frame'))b.parentElement.style.display='none';
 for(const stage of stages){const m=document.createElement('div');m.className='gen-msg';m.setAttribute('role','status');m.hidden=true;stage.querySelector('.choices').before(m);}
 function setBusy(el,text,spin){el.hidden=!text;el.innerHTML=text?(spin?'<span class="gg-spin" aria-hidden="true"></span>':'')+'<span>'+text+'</span>':'';}
@@ -198,10 +205,11 @@ function lock(on){for(const s of selects)s.disabled=on;}
 async function generateFrame(frame,id){
 const stage=document.getElementById('frame-'+frame),msg=stage.querySelector('.gen-msg'),subject='a botanical plant',material=selects[0].value,style=selects[1].value;
 const choices=[...stage.querySelectorAll('.choice')].slice(0,3);
-const prompt='Photorealistic 9:16 vertical macro cinematic botanical time-lapse KEYFRAME '+frame+' of 7 for '+subject+'. Growth stage: '+steps[frame-1]+' All botanical parts including seeds, roots, stems, leaves, flowers and fruit must be realistic '+material+' equivalents, while terracotta pot, dark moist soil, wooden surface and soft garden background remain natural photorealistic materials. '+style+' aesthetics, ultra-crisp detail, physically accurate optical reflections and refractions. LOCKED environment across all seven frames: same elegant weathered terracotta pot centered on wood, soil level with rim, warm golden morning light from upper left, blurred deep green garden bokeh, identical fixed camera at pot rim height, identical framing, no camera motion, no text, no watermark. Growth must be botanically plausible and continuous from earlier keyframes. Frame '+frame+' only.';
+const makePrompt=(scene,detail)=>'Photorealistic 9:16 vertical macro cinematic botanical time-lapse KEYFRAME '+frame+' of 7 for '+subject+'. Growth stage: '+steps[frame-1]+' All botanical parts including seeds, roots, stems, leaves, flowers and fruit must be realistic '+material+' equivalents, while the pot, soil, surface and background remain natural photorealistic materials. '+style+' aesthetics, ultra-crisp detail, physically accurate optical reflections and refractions. LOCKED environment across all seven frames: '+scene+', pot centered, soil level with rim, identical fixed camera at pot rim height, identical framing, no camera motion, no text, no watermark. Growth must be botanically plausible and continuous from earlier keyframes. Frame '+frame+' only. '+detail;
 setBusy(msg,'Generating 3 options for frame '+frame+'… this can take about a minute.',true);
 const one=async(choice)=>{const pick=choice.querySelector('.pick'),thumb=choice.querySelector('.thumb img'),preview=choice.querySelector('.inline-preview img');
-const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt+' Variation '+pick.value+'.',size:'1024x1536'})});const result=await response.json();if(!response.ok||!result.image?.startsWith('data:image/'))throw new Error(result.error||'Generation failed');
+const scene=(frame===1||!lockedScene)?randomScene():lockedScene;choice.dataset.scene=scene;const prompt=makePrompt(scene,'Variation: '+pickOne(DETAILS)+'. Unique render '+Math.random().toString(36).slice(2,10)+'.');
+const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,size:'1024x1536'})});const result=await response.json();if(!response.ok||!result.image?.startsWith('data:image/'))throw new Error(result.error||'Generation failed');
 if(id!==runId)return;thumb.src=result.image;thumb.dataset.generated='true';thumb.alt='Generated frame '+frame+' option '+pick.value;if(preview)preview.src=result.image;
 const film=document.querySelector('.slot:nth-child('+frame+') .img-'+frame+'-'+pick.value);if(film){film.src=result.image;film.dataset.generated='true';}};
 const results=await Promise.allSettled(choices.map(one));if(id!==runId)return false;
@@ -210,19 +218,19 @@ setBusy(msg,ok?(fail?(3-ok)+' of 3 options failed to generate.':''):'Could not g
 return ok>0;}
 start.addEventListener('click',async()=>{
 if(started)return;if(!selects.every(s=>s.value)){setBusy(topStatus,'Choose a material and video style first.',false);return;}
-started=true;const id=++runId;clearImages();lock(true);start.hidden=true;showStages(true);
+started=true;lockedScene=null;const id=++runId;clearImages();lock(true);start.hidden=true;showStages(true);
 setBusy(topStatus,'Starting your seven-frame project…',true);
 const ok=await generateFrame(1,id);if(id!==runId)return;
 if(ok){setBusy(topStatus,'');}else{started=false;start.hidden=false;lock(false);setBusy(topStatus,'Nothing came back. Click Generate to try again.',false);}
 });
 project.addEventListener('change',e=>{
 const r=e.target;if(!started||!r.classList?.contains('pick')||!r.checked)return;
-const frame=Number(r.name.replace('frame-',''));if(frame>=7)return;
+const frame=Number(r.name.replace('frame-',''));const sc=r.closest('.choice')?.dataset.scene;if(frame===1&&sc)lockedScene=sc;if(frame>=7)return;
 const next=document.getElementById('frame-'+(frame+1));
 if(next.querySelector('.thumb img[data-generated="true"]')||!next.querySelector('.gen-msg').hidden)return;
 generateFrame(frame+1,runId);
 });
-project.addEventListener('reset',()=>{runId++;started=false;clearImages();lock(false);start.hidden=false;setBusy(topStatus,'');showStages(false);});
+project.addEventListener('reset',()=>{runId++;started=false;lockedScene=null;clearImages();lock(false);start.hidden=false;setBusy(topStatus,'');showStages(false);});
 clearImages();showStages(false);setBusy(topStatus,'');
 })();
 </script><style>

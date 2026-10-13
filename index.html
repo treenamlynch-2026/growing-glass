@@ -190,7 +190,8 @@ autoWrap.innerHTML='<input type="checkbox" id="auto-pick" form="gg-no-form"><spa
 bar.appendChild(autoWrap);const auto=autoWrap.querySelector('input');
 function autoPick(){if(!auto.checked||!started)return;for(const stage of stages){if(stage.querySelector('.pick:checked'))continue;if(!stage.querySelector('.gen-msg').hidden)return;const ready=[...stage.querySelectorAll('.choice')].filter(c=>c.querySelector('.thumb img')?.dataset.generated==='true');if(!ready.length)return;const r=ready[Math.floor(Math.random()*ready.length)].querySelector('.pick');r.checked=true;r.dispatchEvent(new Event('change',{bubbles:true}));return;}}
 auto.addEventListener('change',autoPick);
-let started=false,runId=0,lockedScene=null;
+let started=false,runId=0,lockedScene=null;const inflight=new Set();
+function cancelAll(){runId++;for(const c of inflight)c.abort();inflight.clear();}
 const pickOne=a=>a[Math.floor(Math.random()*a.length)];
 const POTS=['an elegant weathered terracotta pot','a glossy cobalt-glazed ceramic pot','a matte white stoneware pot','a hand-thrown speckled clay pot','an aged copper planter with green patina','a moss-covered carved stone urn','a vintage cream enamel pot','a charcoal concrete planter'];
 const SURFACES=['a rustic oak table','a slate windowsill','a worn marble ledge','a mossy garden stone','a potting bench dusted with soil','a weathered teak deck'];
@@ -215,7 +216,7 @@ const makePrompt=(scene,detail)=>'Photorealistic 9:16 vertical macro cinematic b
 setBusy(msg,'Generating 3 options for frame '+frame+'… this can take about a minute.',true);
 const one=async(choice)=>{const pick=choice.querySelector('.pick'),thumb=choice.querySelector('.thumb img'),preview=choice.querySelector('.inline-preview img');
 const scene=(frame===1||!lockedScene)?randomScene():lockedScene;choice.dataset.scene=scene;const prompt=makePrompt(scene,'Variation: '+pickOne(DETAILS)+'. Unique render '+Math.random().toString(36).slice(2,10)+'.');
-const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,size:'1024x1536'})});const result=await response.json();if(!response.ok||!result.image?.startsWith('data:image/'))throw new Error(result.error||'Generation failed');
+const ctl=new AbortController();inflight.add(ctl);const response=await fetch(endpoint,{signal:ctl.signal,method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,size:'1024x1536'})});const result=await response.json();if(!response.ok||!result.image?.startsWith('data:image/'))throw new Error(result.error||'Generation failed');
 if(id!==runId)return;thumb.src=result.image;thumb.dataset.generated='true';thumb.alt='Generated frame '+frame+' option '+pick.value;if(preview)preview.src=result.image;
 const film=document.querySelector('.slot:nth-child('+frame+') .img-'+frame+'-'+pick.value);if(film){film.src=result.image;film.dataset.generated='true';}};
 const results=await Promise.allSettled(choices.map(one));if(id!==runId)return false;
@@ -232,12 +233,16 @@ if(ok){setBusy(topStatus,'');}else{started=false;start.hidden=false;lock(false);
 });
 project.addEventListener('change',e=>{
 const r=e.target;if(!started||!r.classList?.contains('pick')||!r.checked)return;
-const frame=Number(r.name.replace('frame-',''));const sc=r.closest('.choice')?.dataset.scene;if(frame===1&&sc)lockedScene=sc;if(frame>=7)return;
-const next=document.getElementById('frame-'+(frame+1));
-if(next.querySelector('.thumb img[data-generated="true"]')||!next.querySelector('.gen-msg').hidden)return;
+const frame=Number(r.name.replace('frame-',''));const sc=r.closest('.choice')?.dataset.scene;if(frame===1&&sc)lockedScene=sc;
+cancelAll();
+for(let f=frame+1;f<=7;f++){const st=document.getElementById('frame-'+f);
+for(const c of st.querySelectorAll('.choice')){c.querySelector('.pick').checked=false;const t=c.querySelector('.thumb img');if(t){t.removeAttribute('src');delete t.dataset.generated;}const pv=c.querySelector('.inline-preview img');if(pv)pv.removeAttribute('src');delete c.dataset.scene;}
+setBusy(st.querySelector('.gen-msg'),'');
+for(const img of document.querySelectorAll('.film .slot:nth-child('+f+') img')){img.removeAttribute('src');delete img.dataset.generated;}}
+if(frame>=7)return;
 generateFrame(frame+1,runId);
 });
-project.addEventListener('reset',()=>{runId++;started=false;lockedScene=null;clearImages();lock(false);start.hidden=false;setBusy(topStatus,'');showStages(false);});
+project.addEventListener('reset',()=>{cancelAll();started=false;lockedScene=null;clearImages();lock(false);start.hidden=false;setBusy(topStatus,'');showStages(false);});
 clearImages();showStages(false);setBusy(topStatus,'');
 })();
 </script><style>
